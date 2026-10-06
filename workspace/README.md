@@ -20,6 +20,16 @@ python3 server.py 8080          # 打开 http://localhost:8080
 `preheat_cli.py` 直接读写各自存储，无需开服务（`audit_cli.py`、`mirror_cli.py`
 与 `preheat_cli.py` 对线上存储只读）。
 
+**边缘地图包分批投放编排器（EdgeCast）** 是独立服务（append-only 事件日志
+`data/edgecast/events.log`，自成一域，不触碰上述存储）：
+
+```bash
+python3 edgecast_server.py 8090          # 打开 http://localhost:8090/edgecast/
+```
+
+详见 [EDGECAST_README.md](EDGECAST_README.md)；命令行 `edgecast_cli.py`、
+一键演示 `bash demo_edgecast.sh`、验收 `python3 test_edgecast.py`。
+
 ## 领域模型与不变量
 
 | 概念 | 说明 |
