@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>边缘地图包分批投放编排器</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #182030; --panel2: #1f2a3e; --line: #2c3a54;
+    --text: #e6ecf7; --muted: #8fa0bd; --accent: #4f8cff;
+    --green: #34c77b; --yellow: #e8b93e; --red: #ef5f6c; --purple: #a480ff;
+    --cyan: #3fc6d8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.55 -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 16px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; background: #121a29; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .live { margin-left: auto; display: flex; align-items: center; gap: 8px;
+    color: var(--muted); font-size: 12px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--green); }
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 16px; padding: 16px 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 14px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .08em; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
+  input, select { width: 100%; padding: 7px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+    font-size: 13px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .groups-box { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--panel2); cursor: pointer; font-size: 12px; user-select: none; }
+  .chip.on { background: #23407a; border-color: var(--accent); color: #cfe0ff; }
+  button { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent);
+    background: var(--accent); color: #fff; font-size: 13px; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--text);
+    border-color: var(--line); }
+  button.warn { background: #8a5a10; border-color: var(--yellow); }
+  button.danger { background: #7d2630; border-color: var(--red); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .batch { border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+    margin-bottom: 10px; cursor: pointer; background: var(--panel2); }
+  .batch:hover { border-color: var(--accent); }
+  .batch.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .batch .top { display: flex; align-items: center; gap: 10px; }
+  .batch .bid { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    color: var(--cyan); }
+  .badge { padding: 2px 9px; border-radius: 999px; font-size: 11px; }
+  .badge.queued { background: #2a3550; color: #aebcd8; }
+  .badge.dispatching { background: #133a26; color: var(--green); }
+  .badge.paused { background: #3d3110; color: var(--yellow); }
+  .badge.completed { background: #133a4d; color: var(--cyan); }
+  .badge.revoked { background: #3a1a2a; color: var(--purple); }
+  .badge.failed { background: #3d1620; color: var(--red); }
+  .progress { height: 6px; background: #0e1626; border-radius: 3px;
+    margin-top: 10px; overflow: hidden; }
+  .progress > i { display: block; height: 100%; background: var(--green); }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 6px;
+    display: flex; gap: 14px; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 11.5px; }
+  td.mono, .mono { font-family: ui-monospace, Menlo, monospace; }
+  .state { padding: 1px 8px; border-radius: 4px; font-size: 11px; }
+  .state.pending { background: #2a3550; } .state.in_flight { background: #133a26; color: var(--green); }
+  .state.retry_wait { background: #3d3110; color: var(--yellow); }
+  .state.acked { background: #133a4d; color: var(--cyan); }
+  .state.failed { background: #3d1620; color: var(--red); }
+  .state.canceled { background: #333; color: #bbb; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .timeline { max-height: 360px; overflow: auto; font-family: ui-monospace,
+    Menlo, monospace; font-size: 12px; }
+  .timeline .ev { padding: 5px 8px; border-bottom: 1px solid #202a3e;
+    display: flex; gap: 10px; }
+  .timeline .ev .t { color: var(--muted); white-space: nowrap; }
+  .timeline .ev .ty { min-width: 150px; color: var(--accent); }
+  #toast { position: fixed; right: 18px; bottom: 18px; max-width: 420px;
+    z-index: 50; display: flex; flex-direction: column; gap: 8px; }
+  .toast-item { padding: 10px 14px; border-radius: 8px; background: var(--panel2);
+    border: 1px solid var(--line); font-size: 12.5px; }
+  .toast-item.ok { border-color: var(--green); }
+  .toast-item.err { border-color: var(--red); }
+  .toast-item.warn { border-color: var(--yellow); }
+  .counts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .counts span { background: #0e1626; border: 1px solid var(--line);
+    border-radius: 5px; padding: 2px 8px; font-size: 11.5px; color: var(--muted); }
+  .counts b { color: var(--text); }
+  .muted { color: var(--muted); }
+  .right { margin-left: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🗺️ 边缘地图包 · 分批投放编排器</h1>
+  <span class="live"><span class="dot" id="liveDot"></span><span id="liveText">实时连接中…</span></span>
+</header>
+
+<main>
+  <div>
+    <div class="panel">
+      <h2>创建投放批次</h2>
+      <label>地图包</label>
+      <select id="fPackage"></select>
+      <label>设备分组（可多选）</label>
+      <div class="groups-box" id="fGroups"></div>
+      <div class="row">
+        <div><label>时间窗开始（留空=立即）</label>
+          <input id="fStart" placeholder="2026-10-06T12:00:00Z"></div>
+        <div><label>时间窗结束</label>
+          <input id="fEnd" placeholder="2026-10-06T13:00:00Z"></div>
+      </div>
+      <div class="row">
+        <div><label>分组并发上限</label><input id="fConcurrency" type="number" value="2" min="1"></div>
+        <div><label>回执阈值（达标即完成）</label><input id="fThreshold" type="number" value="2" min="1"></div>
+      </div>
+      <div class="row">
+        <div><label>单设备超时(秒)</label><input id="fTimeout" type="number" value="30" min="1"></div>
+        <div><label>最大尝试次数</label><input id="fMaxAttempts" type="number" value="3" min="1"></div>
+      </div>
+      <div style="margin-top:12px"><button id="btnCreate">创建批次</button></div>
+    </div>
+
+    <div class="panel">
+      <h2>批次队列</h2>
+      <div id="batchList"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel" id="detailPanel" style="display:none">
+      <h2>批次详情 <span class="right mono" id="dId" style="color:var(--cyan)"></span></h2>
+      <div class="toolbar">
+        <button class="ghost" id="btnPause">⏸ 暂停</button>
+        <button class="ghost" id="btnResume">▶ 恢复</button>
+        <button class="danger" id="btnRevoke">↩ 撤销</button>
+        <button class="ghost" id="btnTick">⏭ 手动推进一拍</button>
+        <button class="ghost" id="btnSummaryJson">下载摘要 JSON</button>
+        <button class="ghost" id="btnSummaryCsv">下载摘要 CSV</button>
+      </div>
+      <div id="dMeta" class="meta"></div>
+      <div class="counts" id="dCounts"></div>
+      <div class="progress"><i id="dProgress" style="width:0"></i></div>
+      <h2 style="margin-top:16px">设备投放状态</h2>
+      <table>
+        <thead><tr><th>设备</th><th>分组</th><th>状态</th><th>尝试</th>
+          <th>当前序号</th><th>下发时间</th><th>失败/取消原因</th></tr></thead>
+        <tbody id="dDeliveries"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>设备回执模拟器（独立入口）</h2>
+      <div class="row">
+        <div><label>设备</label><select id="rDevice"></select></div>
+        <div><label>回执序号</label><input id="rSeq" type="number" value="1"></div>
+      </div>
+      <div class="row">
+        <div><label>批次</label><select id="rBatch"></select></div>
+        <div><label>包版本</label><input id="rVersion" value="2.4.1"></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label style="display:flex;align-items:center;gap:6px;margin:0">
+          <input type="checkbox" id="rBadChecksum" style="width:auto"> 破坏摘要（应被拒绝）</label>
+        <label style="display:flex;align-items:center;gap:6px;margin:0">
+          <input type="checkbox" id="rOldVersion" style="width:auto"> 伪造旧版本 2.3.0</label>
+      </div>
+      <div style="margin-top:10px"><button id="btnReceipt">提交回执</button></div>
+    </div>
+
+    <div class="panel" id="timelinePanel" style="display:none">
+      <h2>完整时间线（可按分组 / 设备过滤）</h2>
+      <div class="toolbar">
+        <select id="tGroup" style="width:auto"><option value="">全部分组</option></select>
+        <select id="tDevice" style="width:auto"><option value="">全部设备</option></select>
+      </div>
+      <div class="timeline" id="dTimeline"></div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let batches = [], packages = [], devices = [], currentId = null;
+let groups = new Set();
+
+async function api(method, path, body) {
+  const opt = { method, headers: { "Accept": "application/json" } };
+  if (body !== undefined) { opt.headers["Content-Type"] = "application/json";
+    opt.body = JSON.stringify(body); }
+  const resp = await fetch(path, opt);
+  const text = await resp.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!resp.ok) throw Object.assign(new Error(data?.message || resp.statusText),
+    { status: resp.status, data });
+  return data;
+}
+
+function toast(msg, kind = "ok") {
+  const el = document.createElement("div");
+  el.className = "toast-item " + kind;
+  el.textContent = (typeof msg === "string" ? msg : JSON.stringify(msg));
+  $("toast").appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString("zh-CN",
+  { hour12: false }) : "—";
+
+async function refreshAll() {
+  [packages, devices, batches] = await Promise.all([
+    api("GET", "/api/packages"), api("GET", "/api/devices"),
+    api("GET", "/api/batches")]);
+  renderForms();
+  renderBatches();
+  if (currentId) await renderDetail(currentId);
+}
+
+function renderForms() {
+  const grpSet = [...new Set(devices.map(d => d.group))];
+  $("fPackage").innerHTML = packages.map(p =>
+    `<option value="${p.package_id}">${p.name || p.package_id} · v${p.version}</option>`).join("");
+  const gbox = $("fGroups");
+  if (!gbox.dataset.init) {
+    gbox.dataset.init = "1";
+    gbox.addEventListener("click", e => {
+      const chip = e.target.closest(".chip"); if (!chip) return;
+      chip.classList.toggle("on");
+      chip.dataset.group && groups.has(chip.dataset.group)
+        ? groups.delete(chip.dataset.group) : groups.add(chip.dataset.group);
+    });
+  }
+  gbox.innerHTML = grpSet.map(g =>
+    `<div class="chip ${groups.has(g) ? "on" : ""}" data-group="${g}">
+      ${g} (${devices.filter(d => d.group === g).length}台)</div>`).join("");
+  $("rDevice").innerHTML = devices.map(d =>
+    `<option value="${d.device_id}">${d.name || d.device_id} · ${d.group}</option>`).join("");
+  $("rBatch").innerHTML = batches.map(b =>
+    `<option value="${b.batch_id}">${b.batch_id} · ${b.status}</option>`).join("");
+}
+
+function renderBatches() {
+  $("batchList").innerHTML = batches.map(b => {
+    const total = b.device_ids.length;
+    const pct = total ? Math.round(b.acked_count / b.ack_threshold * 100) : 0;
+    return `<div class="batch ${b.batch_id === currentId ? "sel" : ""}" data-id="${b.batch_id}">
+      <div class="top"><span class="bid">${b.batch_id}</span>
+        <span class="badge ${b.status}">${statusZh(b.status)}</span>
+        <span class="right muted">${b.package_id}@${b.package_version}</span></div>
+      <div class="meta"><span>回执 <b>${b.acked_count}/${b.ack_threshold}</b></span>
+        <span>并发上限 ${b.max_concurrency}</span><span>在途 ${b.in_flight_count}</span>
+        <span>分组 ${b.groups.join(",")}</span></div>
+      <div class="progress"><i style="width:${Math.min(100, pct)}%"></i></div>
+    </div>`;
+  }).join("") || `<p class="muted">暂无批次，先在左侧创建。</p>`;
+  document.querySelectorAll(".batch").forEach(el =>
+    el.onclick = () => { currentId = el.dataset.id; renderDetail(currentId); renderBatches(); });
+}
+
+function statusZh(s) {
+  return { queued: "排队", dispatching: "投放中", paused: "已暂停",
+    completed: "已完成", revoked: "已撤销", failed: "已失败" }[s] || s;
+}
+
+async function renderDetail(id) {
+  const b = await api("GET", `/api/batches/${id}`);
+  $("detailPanel").style.display = "";
+  $("timelinePanel").style.display = "";
+  $("dId").textContent = b.batch_id;
+  $("dMeta").innerHTML =
+    `<span>状态：<span class="badge ${b.status}">${statusZh(b.status)}</span></span>
+     <span>时间窗：${fmtTime(b.window_start_iso)} ~ ${fmtTime(b.window_end_iso)}</span>
+     <span>并发：${b.max_concurrency}（当前在途 ${b.in_flight_count}）</span>
+     <span>超时：${b.timeout_secs}s · 最多 ${b.max_attempts} 次</span>
+     <span>暂存乱序回执序号：${(b.buffered_seqs||[]).join(", ") || "无"}</span>`;
+  const c = b.state_counts;
+  $("dCounts").innerHTML =
+    `<span>待投放 <b>${c.pending||0}</b></span><span>投放中 <b>${c.in_flight||0}</b></span>
+     <span>待重试 <b>${c.retry_wait||0}</b></span><span>已回执 <b>${c.acked||0}</b></span>
+     <span>失败 <b>${c.failed||0}</b></span><span>取消 <b>${c.canceled||0}</b></span>`;
+  $("dProgress").style.width = Math.min(100, b.acked_count / b.ack_threshold * 100) + "%";
+  $("dDeliveries").innerHTML = b.deliveries.map(d =>
+    `<tr><td class="mono">${d.device_id}</td><td>${d.group}</td>
+     <td><span class="state ${d.state}">${d.state}</span></td><td>${d.attempt}</td>
+     <td class="mono">${d.seq || "—"}</td><td>${fmtTime(d.dispatched_at_iso)}</td>
+     <td class="muted">${d.fail_reason || d.canceled_reason || ""}</td></tr>`).join("");
+  $("btnPause").disabled = !["queued","dispatching"].includes(b.status);
+  $("btnResume").disabled = b.status !== "paused";
+  $("btnRevoke").disabled = ["completed","revoked","failed"].includes(b.status);
+  $("tGroup").innerHTML = `<option value="">全部分组</option>` +
+    b.groups.map(g => `<option>${g}</option>`).join("");
+  $("tDevice").innerHTML = `<option value="">全部设备</option>` +
+    b.deliveries.map(d => `<option>${d.device_id}</option>`).join("");
+  await renderTimeline();
+}
+
+async function renderTimeline() {
+  if (!currentId) return;
+  const g = $("tGroup").value, dev = $("tDevice").value;
+  const qs = new URLSearchParams();
+  if (g) qs.set("group", g); if (dev) qs.set("device_id", dev);
+  const events = await api("GET", `/api/batches/${currentId}/timeline?${qs}`);
+  const typeZh = { batch_created: "批次创建", batch_activated: "时间窗激活",
+    batch_paused: "暂停", batch_resumed: "恢复", batch_revoked: "撤销",
+    batch_completed: "完成 ✅", batch_failed: "失败 ❌",
+    batch_window_closed: "时间窗关闭", delivery_queued: "设备入队",
+    delivery_dispatched: "下发", delivery_timeout: "超时→待重试",
+    delivery_acked: "回执确认", delivery_failed: "投放失败",
+    delivery_canceled: "投放取消", receipt_accepted: "回执接受",
+    receipt_buffered: "乱序暂存", receipt_rejected: "回执拒绝",
+    receipt_duplicate: "重复回执", receipt_conflict: "同号冲突" };
+  $("dTimeline").innerHTML = events.slice().reverse().map(e =>
+    `<div class="ev"><span class="t">${fmtTime(e.iso_ts)}</span>
+      <span class="ty">#${e.id} ${typeZh[e.type] || e.type}</span>
+      <span class="muted">${summarize(e)}</span></div>`).join("");
+}
+function summarize(e) {
+  const p = e.payload;
+  if (p.device_id) return `${p.device_id}${p.seq ? "#" + p.seq : ""}` +
+    (p.reason ? " — " + p.reason : p.reason_code ? " — " + p.reason_code : "");
+  return p.reason || "";
+}
+
+$("btnCreate").onclick = async () => {
+  if (!groups.size) return toast("请至少选择一个分组", "err");
+  try {
+    const b = await api("POST", "/api/batches", {
+      package_id: $("fPackage").value, groups: [...groups],
+      window_start: $("fStart").value || null, window_end: $("fEnd").value,
+      max_concurrency: +$("fConcurrency").value, ack_threshold: +$("fThreshold").value,
+      timeout_secs: +$("fTimeout").value, max_attempts: +$("fMaxAttempts").value });
+    currentId = b.batch_id;
+    toast(`批次 ${b.batch_id} 已创建并入队`);
+    await refreshAll();
+  } catch (e) { toast(e.message, "err"); }
+};
+$("btnPause").onclick = async () => {
+  await api("POST", `/api/batches/${currentId}/pause`, {}); await refreshAll(); };
+$("btnResume").onclick = async () => {
+  await api("POST", `/api/batches/${currentId}/resume`); await refreshAll(); };
+$("btnRevoke").onclick = async () => {
+  if (!confirm("确认撤销该批次？撤销为终态操作。")) return;
+  try { await api("POST", `/api/batches/${currentId}/revoke`, {}); await refreshAll(); }
+  catch (e) { toast(e.message, "err"); }
+};
+$("btnTick").onclick = async () => { const r = await api("POST", "/api/tick");
+  toast(`推进一拍：下发 ${r.dispatched.length}，超时 ${r.timed_out.length}，结算 ${r.settled.length}`);
+  await refreshAll(); };
+$("btnSummaryJson").onclick = () =>
+  window.open(`/api/batches/${currentId}/summary?format=json`);
+$("btnSummaryCsv").onclick = () =>
+  window.open(`/api/batches/${currentId}/summary?format=csv`);
+$("tGroup").onchange = renderTimeline;
+$("tDevice").onchange = renderTimeline;
+
+$("btnReceipt").onclick = async () => {
+  const deviceId = $("rDevice").value, batchId = $("rBatch").value;
+  const batch = batches.find(b => b.batch_id === batchId);
+  const receipt = {
+    device_id: deviceId, seq: +$("rSeq").value,
+    package_id: batch?.package_id || $("fPackage").value,
+    version: $("rOldVersion").checked ? "2.3.0" : $("rVersion").value,
+    batch_id: batchId, checksum: "0".repeat(64) };
+  try {
+    let r;
+    if ($("rBadChecksum").checked) {
+      r = await api("POST", "/api/receipts", receipt);
+    } else {
+      const w = await api("POST", "/api/receipts/with-checksum",
+        (({ checksum, ...rest }) => rest)(receipt));
+      r = w.result;
+    }
+    const kind = r.outcome === "rejected" || r.outcome === "conflict" ? "err"
+      : r.outcome === "buffered" ? "warn" : "ok";
+    toast(`${r.outcome} · seq ${r.seq} · ${r.reason || ""}`, kind);
+  } catch (e) {
+    toast(e.data?.reason || e.message, "err");
+  }
+  await refreshAll();
+};
+
+// SSE 实时事件流
+function connectSSE() {
+  const es = new EventSource("/api/events");
+  es.onopen = () => { $("liveDot").style.background = "var(--green)";
+    $("liveText").textContent = "实时事件流已连接"; };
+  es.onmessage = async (ev) => {
+    const e = JSON.parse(ev.data);
+    const typeZh2 = { batch_paused: "批次暂停", batch_revoked: "批次撤销",
+      batch_completed: "批次完成 🎉", batch_failed: "批次失败",
+      delivery_dispatched: "设备下发", delivery_acked: "收到回执",
+      delivery_timeout: "设备超时", receipt_buffered: "乱序回执暂存",
+      receipt_rejected: "回执被拒绝", receipt_conflict: "同号冲突！",
+      receipt_duplicate: "重复回执" };
+    if (typeZh2[e.type]) toast(`${typeZh2[e.type]}：${summarize(e)}`,
+      ["receipt_rejected","receipt_conflict","batch_failed","delivery_timeout"]
+        .includes(e.type) ? "warn" : "ok");
+    await refreshAll();
+  };
+  es.onerror = () => { $("liveDot").style.background = "var(--red)";
+    $("liveText").textContent = "连接中断，重连中…"; };
+}
+
+refreshAll().then(connectSSE).catch(e => toast(e.message, "err"));
+</script>
+</body>
+</html>
